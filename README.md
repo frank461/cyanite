@@ -103,6 +103,7 @@ store:
   keyspace: 'metric'
   chan_size: 10000 # defaults to 10000
   batch_size: 500 # defaults to 500
+  use_ttl_table_suffix: false # defaults to false, when true appends ttl to metrics table name (e.g. select * from metric_ttl86400 where...)
 ```
 
 You can also specify your rollups as [carbon-style](http://graphite.readthedocs.org/en/latest/config-carbon.html#storage-schemas-conf) retention description.
