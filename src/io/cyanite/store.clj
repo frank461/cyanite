@@ -182,11 +182,13 @@
       (fetch [this agg paths tenant rollup period from to]
         (debug "fetching paths from store: " paths rollup period from to)
         (if-let [data (and (seq paths)
-                           (->> (alia/execute
-                                 session fetch!
-                                 {:values [paths (int rollup) (int period)
-                                           from to]
-                                  :fetch-size Integer/MAX_VALUE})
+                           (->> (sort-by :time (apply concat
+                                  (pmap
+                                    #(alia/execute
+                                       session fetch!
+                                       {:values [(list %) (int rollup) (int period) from to]
+                                        :fetch-size Integer/MAX_VALUE})
+                                    paths)))
                                 (map (partial aggregate-with (keyword agg)))
                                 (seq)))]
           (let [min-point  (:time (first data))
