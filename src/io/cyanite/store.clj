@@ -25,7 +25,7 @@
 ;; cyanite relies on very few queries, I decided against using
 ;; hayt
 
-(defn insertq
+(def insertq
   "Yields a cassandra prepared statement of 6 arguments:
 
 * `ttl`: how long to keep the point around
@@ -34,14 +34,15 @@
 * `period`: rollup multiplier which determines the time to keep points for
 * `path`: name of the metric
 * `time`: timestamp of the metric, should be divisible by rollup"
-  [session]
+  (memoize (fn
+  [session ttl]
   (alia/prepare
    session
    (str
-    "UPDATE metric USING TTL ? SET data = data + ? "
-    "WHERE tenant = '' AND rollup = ? AND period = ? AND path = ? AND time = ?;")))
+    "UPDATE metric" ttl " USING TTL ? SET data = data + ? "
+    "WHERE tenant = '' AND rollup = ? AND period = ? AND path = ? AND time = ?;")))))
 
-(defn fetchq
+(def fetchq
   "Yields a cassandra prepared statement of 6 arguments:
 
 * `paths`: list of paths
@@ -50,13 +51,14 @@
 * `min`: return points starting from this timestamp
 * `max`: return points up to this timestamp
 * `limit`: maximum number of points to return"
-  [session]
+  (memoize (fn
+  [session ttl]
   (alia/prepare
    session
    (str
-    "SELECT path,data,time FROM metric WHERE "
+    "SELECT path,data,time FROM metric" ttl " WHERE "
     "path IN ? AND tenant = '' AND rollup = ? AND period = ? "
-    "AND time >= ? AND time <= ? ORDER BY time ASC;")))
+    "AND time >= ? AND time <= ? ORDER BY time ASC;")))))
 
 
 (defn useq
@@ -139,8 +141,8 @@
 (defn cassandra-metric-store
   "Connect to cassandra and start a path fetching thread.
    The interval is fixed for now, at 1minute"
-  [{:keys [keyspace cluster hints repfactor chan_size batch_size username password]
-    :or   {chan_size 10000 batch_size 500}}]
+  [{:keys [keyspace cluster hints repfactor chan_size batch_size username password use_ttl_table_suffix]
+    :or   {chan_size 10000 batch_size 500 use_ttl_table_suffix false}}]
   (info "creating cassandra metric store")
   (let [hints   (or hints
                     {:replication {:class "SimpleStrategy"
@@ -151,8 +153,8 @@
                    (assoc :credentials {:user username :password password}))
           (alia/cluster)
           (alia/connect keyspace))
-        insert! (insertq session)
-        fetch!  (fetchq session)]
+      get_table_suffix (fn [ttl] (if use_ttl_table_suffix (str "_ttl" ttl) ""))
+      ]
     (reify
       Metricstore
       (channel-for [this]
@@ -165,19 +167,20 @@
                              #(let [{:keys [metric path time rollup period ttl]} %]
                                 [(int ttl) [metric] (int rollup) (int period) path time])
                              payload)]
-                 (take!
-                  (alia/execute-chan session (batch insert! values) {:consistency :any})
-                  (fn [rows-or-e]
-                    (if (instance? Throwable rows-or-e)
-                      (info rows-or-e "Cassandra error")
-                      (debug "Batch written")))))
+                 (doseq [table_suffix_and_values (group-by (comp get_table_suffix first) values)]
+                   (take!
+                    (alia/execute-chan session (batch (insertq session (first table_suffix_and_values)) (second table_suffix_and_values)) {:consistency :any})
+                    (fn [rows-or-e]
+                      (if (instance? Throwable rows-or-e)
+                        (info rows-or-e "Cassandra error")
+                        (debug "Batch written"))))))
                (catch Exception e
                  (info e "Store processing exception")))))
           ch))
       (insert [this ttl data tenant rollup period path time]
         (alia/execute-chan
          session
-         insert!
+         (insertq session (get_table_suffix ttl))
          {:values [ttl data tenant rollup period path time]}))
       (fetch [this agg paths tenant rollup period from to]
         (debug "fetching paths from store: " paths rollup period from to)
@@ -185,7 +188,7 @@
                            (->> (sort-by :time (apply concat
                                   (pmap
                                     #(alia/execute
-                                       session fetch!
+                                       session (fetchq session (get_table_suffix (* period rollup)))
                                        {:values [(list %) (int rollup) (int period) from to]
                                         :fetch-size Integer/MAX_VALUE})
                                     paths)))
