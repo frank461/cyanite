@@ -32,6 +32,10 @@
    :host    "127.0.0.1"
    :port    8080})
 
+(def ^{:doc "prefer rollups returning no more than 1680 datapoints by default"}
+  default-max-data-points
+  1680)
+
 (def default-index
   {:use "io.cyanite.path/memory-pathstore"})
 
@@ -67,6 +71,25 @@
    convert it to a {:rollup :period} pair"
   [rollups]
   (map convert-shorthand-rollup rollups))
+
+(defn set-rollup-defaults
+  "set the ttl and maxDataPoints to default values when missing."
+  [default-max-data-points rollup]
+  {:rollup (:rollup rollup)
+   :period (:period rollup)
+   :ttl (* (:rollup rollup) (:period rollup))
+   :maxDataPoints (or (:maxDataPoints rollup) default-max-data-points)
+   }
+  )
+
+(defn set-rollups-defaults
+  "set the ttl and maxDataPoints to default values when missing."
+  [config-max-data-points rollups]
+  (let [completed-rollups (map (partial set-rollup-defaults (or config-max-data-points default-max-data-points)) rollups)]
+    (debug "rollups populated with defaults: " completed-rollups)
+    completed-rollups
+    )
+  )
 
 (defn assoc-rollup-to
   "Enhance a rollup definition with a function to compute
@@ -126,6 +149,7 @@
 
           (update-in [:carbon] (partial merge default-carbon))
           (update-in [:carbon :rollups] convert-shorthand-rollups)
+          (update-in [:carbon :rollups] (partial set-rollups-defaults (:maxDataPoints (:http config))))
           (update-in [:carbon :rollups] assoc-rollup-to)
           (update-in [:index] (partial merge default-index))
           (update-in [:index] get-instance :index)

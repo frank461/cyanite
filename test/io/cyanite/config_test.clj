@@ -1,6 +1,6 @@
 (ns io.cyanite.config-test
   (:require [io.cyanite.config :refer :all]
-            [clojure.test      :refer :all])
+            [clojure.test :refer :all])
   (:import clojure.lang.ExceptionInfo))
 
 (deftest is-seconds-test
@@ -33,3 +33,14 @@
     (is (= {:rollup 15
             :period 1440
             :ttl 21600} (convert-shorthand-rollup "15s:6h")))))
+
+(deftest set-rollups-defaults-test
+  (testing "rollup default values"
+    (is (=
+          [{:rollup 10 :period 200 :ttl 2000 :maxDataPoints 99}
+           {:rollup 10 :period 200 :ttl 2000 :maxDataPoints 1680}
+           {:rollup 10 :period 3000 :ttl 30000 :maxDataPoints 88}]
+          (set-rollups-defaults 1680 [{:rollup 10 :period 200 :ttl 100 :maxDataPoints 99}
+                                      {:rollup 10 :period 200 :ttl 77}
+                                      {:rollup 10 :period 3000 :maxDataPoints 88}])
+          ))))

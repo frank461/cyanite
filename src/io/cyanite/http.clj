@@ -31,12 +31,32 @@
    nil))
 
 (defn find-best-rollup
-  "Find most precise storage period given the oldest point wanted"
-  [from rollups]
-  (let [within (fn [{:keys [rollup period] :as rollup-def}]
-                 (and (>= (Long/parseLong from) (- (now) (* rollup period)))
-                      rollup-def))]
-    (some within (sort-by :rollup rollups))))
+  "Find best storage period. storage periods are ranked as follows:
+  if ttl matters, return the older ttl.
+  else if either period exceeds maxDataPoints, return the larger rollup
+  else return the smaller rollup"
+  [from to rollups]
+  (let [from_long (Long/parseLong from)
+        requested_range (- (if to (Long/parseLong to) (now)) from_long)
+        ttl_required (- (now) from_long)
+        comparer (fn [x y]
+                   (if (and
+                         (or
+                           (< (:ttl x) ttl_required)
+                           (< (:ttl y) ttl_required)
+                           )
+                         (not= (:ttl x) (:ttl y)))
+                     (- (:ttl y) (:ttl x))
+                     (if
+                       (or
+                         (< (* (:rollup x) (:maxDataPoints x)) requested_range)
+                         (< (* (:rollup y) (:maxDataPoints y)) requested_range)
+                         )
+                       (- (:rollup y) (:rollup x))
+                       (- (:rollup x) (:rollup y))
+                       )
+                     ))]
+    (first (sort comparer rollups))))
 
 (defn assoc-params
   "Parse query args"
@@ -74,7 +94,7 @@
 (defmethod process :metrics
   [{{:keys [from to path agg]} :params :keys [index store rollups]}]
   (debug "fetching paths: " path)
-  (if-let [{:keys [rollup period]} (find-best-rollup from rollups)]
+  (if-let [{:keys [rollup period]} (find-best-rollup from to rollups)]
     (let [to    (if to (Long/parseLong to) (now))
           from  (Long/parseLong from)
           paths (mapcat (partial path/lookup index "")
