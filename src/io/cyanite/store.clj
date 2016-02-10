@@ -39,7 +39,7 @@
   (alia/prepare
    session
    (str
-    "UPDATE metric" ttl " USING TTL ? SET data = data + ? "
+    "UPDATE metric" ttl " USING TTL ? SET data = ? "
     "WHERE tenant = '' AND rollup = ? AND period = ? AND path = ? AND time = ?;")))))
 
 (def fetchq
